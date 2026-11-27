@@ -65,7 +65,8 @@ placeholders). **Never run against a real Firebase project or a real Zeffy payme
    payment / `webhookEvents` doc gets a `signature` field with `matched` (which variant worked, or null) and the
    header names. After the first real delivery: read that, keep only the matching variant, reject on mismatch,
    and add a timestamp tolerance (5 minutes). If nothing matched, read the API docs in a browser or ask Zeffy.
-   Webhook is set up in Zeffy for payment.completed, payment.updated, payment.deleted.
+   Webhook is set up in Zeffy for payment.completed, payment.updated, payment.deleted. A Zeffy API key is stored
+   as `ZEFFY_API_KEY` (`.env.local` and Vercel; verified working, unused by the code so far).
 2. **Do manual cash/e-transfer entries fire the webhook or appear in the API?** Unknown; docs say the API can filter
    payments by type online/manual/imported. If not, add a scheduled poll of the Zeffy API (Bearer key, read-only for
    payments; it can also write manual payments once Stripe verification is done).
