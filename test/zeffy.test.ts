@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchPassType, parsePayment } from "../src/lib/zeffy";
+import { birthDateOf, matchPassType, parseDateText, parsePayment } from "../src/lib/zeffy";
 import { GROWING_UP_DENMAN as gud, formatPassTypes, parsePassTypes } from "../src/lib/programConfig";
 
 // NOTE: payload shape is a GUESS until checked against a real Zeffy test purchase.
@@ -36,4 +36,34 @@ test("adult program: buyer is the attendee", () => {
   const adult = { ...gud, id: "adult-ed", freeUnderAge: null, questions: { name: "", birth: "", dietary: "" } };
   const { tickets } = parsePayment({ id: "p3", buyer: { name: "Pat", email: "p@x.ca" }, line_items: [{ rate_title: "Drop-in" }] }, adult);
   assert.equal(tickets[0].name, "Pat");
+});
+
+test("free-text birth dates: common formats, ambiguous ones left blank", () => {
+  assert.equal(parseDateText("2021-03-02"), "2021-03-02");
+  assert.equal(parseDateText("2021/3/2"), "2021-03-02");
+  assert.equal(parseDateText("March 2, 2021"), "2021-03-02");
+  assert.equal(parseDateText("2 Mar 2021"), "2021-03-02");
+  assert.equal(parseDateText("25/03/2021"), "2021-03-25"); // day first, unambiguous
+  assert.equal(parseDateText("03/25/2021"), "2021-03-25"); // month first, unambiguous
+  assert.equal(parseDateText("03/04/2021"), ""); // could be either: don't guess
+  assert.equal(parseDateText("2021-02-30"), ""); // not a real day
+  assert.equal(parseDateText("soon"), "");
+});
+
+test("birth date from separate day / month / year questions", () => {
+  const answers = [
+    { question: "Child's Birth date - Day", answer: "2" },
+    { question: "Child's Birth date - Month", answer: "March" },
+    { question: "Child's Birth date - Year", answer: "2024" },
+  ];
+  assert.deepEqual(birthDateOf(answers, "birth"), { date: "2024-03-02", raw: "2024/March/2" });
+});
+
+test("unreadable birth date is flagged with what was typed", () => {
+  const { tickets, payment } = parsePayment({
+    id: "p4", buyer: { name: "Sam", email: "s@x.ca" },
+    line_items: [{ rate_title: "Drop-in", answers: [{ question: "Child's Name", answer: "Ada" }, { question: "Child's Birth date", answer: "03/04/2024" }] }],
+  }, gud);
+  assert.equal(tickets[0].birthDate, "");
+  assert.ok(payment.warnings.some((w) => w.includes('"03/04/2024"')));
 });
