@@ -6,3 +6,6 @@ next-env.d.ts
 *.tar.gz
 firestore-debug.log
 *-debug.log
+
+.vercel
+.env*
