@@ -59,6 +59,13 @@ placeholders). **Never run against a real Firebase project or a real Zeffy payme
    but not the field names. `parsePayment` tries several. Do a test purchase of each rate, read the saved raw
    payload (`payments/<id>`), and tighten `src/lib/zeffy.ts` and its tests. The webhook event is `payment.completed`;
    `payment.updated` (refunds/disputes) carries only the id.
+1b. **Webhook signature scheme.** Zeffy gave a `whsec_` signing secret (in `.env.local` and Vercel as
+   `ZEFFY_WEBHOOK_SECRET`) but its docs don't say how messages are signed (the API reference at
+   zeffy.com/api/docs only renders in a browser). `src/lib/webhookSignature.ts` runs in OBSERVE mode: each
+   payment / `webhookEvents` doc gets a `signature` field with `matched` (which variant worked, or null) and the
+   header names. After the first real delivery: read that, keep only the matching variant, reject on mismatch,
+   and add a timestamp tolerance (5 minutes). If nothing matched, read the API docs in a browser or ask Zeffy.
+   Webhook is set up in Zeffy for payment.completed, payment.updated, payment.deleted.
 2. **Do manual cash/e-transfer entries fire the webhook or appear in the API?** Unknown; docs say the API can filter
    payments by type online/manual/imported. If not, add a scheduled poll of the Zeffy API (Bearer key, read-only for
    payments; it can also write manual payments once Stripe verification is done).

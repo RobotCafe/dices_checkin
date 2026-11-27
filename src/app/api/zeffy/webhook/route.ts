@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/admin";
 import { bcDate } from "@/lib/time";
 import type { Program } from "@/lib/types";
+import { checkSignature, type SignatureCheck } from "@/lib/webhookSignature";
 import { campaignIdOf, parsePayment } from "@/lib/zeffy";
 
 export const runtime = "nodejs";
@@ -18,9 +19,17 @@ export async function POST(req: Request) {
   if (!process.env.ZEFFY_WEBHOOK_TOKEN || token !== process.env.ZEFFY_WEBHOOK_TOKEN) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = await req.json();
+  const raw = await req.text();
+  let body: any;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return NextResponse.json({ error: "invalid json" }, { status: 400 });
+  }
+  // OBSERVE mode: record whether Zeffy's signature matched a known scheme; don't reject yet (see webhookSignature.ts).
+  const signature = checkSignature(req.headers, raw, process.env.ZEFFY_WEBHOOK_SECRET ?? "");
   const type: string = body.type ?? body.event ?? "";
-  const payment = body.payment ?? body.data ?? body;
+  const payment = body.payment ?? body.data?.object ?? body.data ?? body;
   const db = adminDb();
 
   // payment.updated / deleted carry only the id (refunds, disputes): flag for staff, don't guess.
@@ -28,13 +37,17 @@ export async function POST(req: Request) {
     const id = String(payment.id ?? body.id ?? "");
     if (id) {
       await db.collection("payments").doc(id).set(
-        { needsReview: true, lastEvent: type, lastEventAt: new Date().toISOString() },
+        { needsReview: true, lastEvent: type, lastEventAt: new Date().toISOString(), lastEventRaw: body, signature },
         { merge: true },
       );
     }
     return NextResponse.json({ ok: true });
   }
-  if (type !== "payment.completed") return NextResponse.json({ ok: true, ignored: type });
+  if (type !== "payment.completed") {
+    // Unknown or test events: keep them (admin-only) so the payload shape can be checked.
+    await db.collection("webhookEvents").add({ type, raw: body, signature, receivedAt: new Date().toISOString() });
+    return NextResponse.json({ ok: true, ignored: type });
+  }
 
   const paymentId = String(payment.id ?? "");
   if (!paymentId) return NextResponse.json({ error: "no payment id" }, { status: 400 });
@@ -52,7 +65,7 @@ export async function POST(req: Request) {
   if (!claim) return NextResponse.json({ ok: true, duplicate: true });
 
   try {
-    return await processPayment(db, payRef, paymentId, payment, claim.flaggedBefore);
+    return await processPayment(db, payRef, paymentId, payment, claim.flaggedBefore, signature);
   } catch (e) {
     await payRef.set({ processingSince: FieldValue.delete() }, { merge: true }).catch(() => {});
     throw e; // 500, so Zeffy retries
@@ -67,6 +80,7 @@ async function processPayment(
   paymentId: string,
   payment: any,
   flaggedBefore: boolean,
+  signature: SignatureCheck,
 ) {
 
   // Which program is this? Match the Zeffy campaign id.
@@ -76,7 +90,7 @@ async function processPayment(
     : null;
   if (!found || found.empty) {
     await payRef.set({
-      raw: payment, processed: false, needsReview: true, processingSince: FieldValue.delete(),
+      raw: payment, signature, processed: false, needsReview: true, processingSince: FieldValue.delete(),
       warnings: [`No program is linked to Zeffy campaign "${campaignId || "(none found in payload)"}"`],
       receivedAt: new Date().toISOString(),
     }, { merge: true });
@@ -133,7 +147,7 @@ async function processPayment(
   }
 
   batch.set(payRef, {
-    raw: payment, programId: program.id, status: parsed.status, warnings: parsed.warnings,
+    raw: payment, signature, programId: program.id, status: parsed.status, warnings: parsed.warnings,
     needsReview: parsed.warnings.length > 0 || flaggedBefore, processed: true, processingSince: FieldValue.delete(),
     receivedAt: new Date().toISOString(),
   }, { merge: true });

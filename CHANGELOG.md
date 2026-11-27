@@ -17,6 +17,12 @@ Not yet deployed to Vercel.
 - Vercel project `dices-checkin` created and connected to the GitHub repo (now public); settings stored in Vercel.
 - Firebase service account key files can never be committed.
 
+### Added
+- Zeffy webhook signature check, in observe mode. Zeffy signs each message with a secret but doesn't document how,
+  so the app tries the likely methods, records which one matched (and which headers Zeffy sent) on each payment,
+  and doesn't reject anything yet. The secret token in the webhook URL still protects the endpoint. Events the app
+  doesn't act on (such as a Zeffy test) are kept in an admin-only `webhookEvents` collection.
+
 ### Fixed
 - Birth dates from Zeffy are read whether the buyer typed one date ("March 2, 2021", "2021-03-02", "25/03/2021")
   or answered separate day / month / year questions. Previously only `YYYY-MM-DD` worked, so the under-3 rule

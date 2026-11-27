@@ -78,6 +78,11 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if false;
     }
+    // Webhook events the app didn't act on (tests, unknown types). Server writes; admin reads.
+    match /webhookEvents/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
     match /audit/{id} {
       allow read: if isAdmin();
       allow create: if isStaff();
