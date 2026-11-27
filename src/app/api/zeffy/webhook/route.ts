@@ -39,8 +39,35 @@ export async function POST(req: Request) {
   const paymentId = String(payment.id ?? "");
   if (!paymentId) return NextResponse.json({ error: "no payment id" }, { status: 400 });
   const payRef = db.collection("payments").doc(paymentId);
-  const existing = await payRef.get();
-  if (existing.exists && existing.data()?.processed) return NextResponse.json({ ok: true, duplicate: true });
+
+  // Claim the payment atomically so two deliveries arriving together can't both create passes.
+  // A claim left by a crashed attempt expires, so Zeffy's next retry still gets processed.
+  const claim = await db.runTransaction(async (tx) => {
+    const d = (await tx.get(payRef)).data();
+    if (d?.processed) return null;
+    if (d?.processingSince && Date.now() - Date.parse(d.processingSince) < CLAIM_MS) return null;
+    tx.set(payRef, { processingSince: new Date().toISOString() }, { merge: true });
+    return { flaggedBefore: d?.needsReview === true && !!d?.lastEvent }; // e.g. a refund event got here first
+  });
+  if (!claim) return NextResponse.json({ ok: true, duplicate: true });
+
+  try {
+    return await processPayment(db, payRef, paymentId, payment, claim.flaggedBefore);
+  } catch (e) {
+    await payRef.set({ processingSince: FieldValue.delete() }, { merge: true }).catch(() => {});
+    throw e; // 500, so Zeffy retries
+  }
+}
+
+const CLAIM_MS = 120_000;
+
+async function processPayment(
+  db: FirebaseFirestore.Firestore,
+  payRef: FirebaseFirestore.DocumentReference,
+  paymentId: string,
+  payment: any,
+  flaggedBefore: boolean,
+) {
 
   // Which program is this? Match the Zeffy campaign id.
   const campaignId = campaignIdOf(payment);
@@ -49,10 +76,10 @@ export async function POST(req: Request) {
     : null;
   if (!found || found.empty) {
     await payRef.set({
-      raw: payment, processed: false, needsReview: true,
+      raw: payment, processed: false, needsReview: true, processingSince: FieldValue.delete(),
       warnings: [`No program is linked to Zeffy campaign "${campaignId || "(none found in payload)"}"`],
       receivedAt: new Date().toISOString(),
-    });
+    }, { merge: true });
     return NextResponse.json({ ok: true, unmatched: true });
   }
   const program = { id: found.docs[0].id, ...found.docs[0].data() } as Program;
@@ -107,8 +134,9 @@ export async function POST(req: Request) {
 
   batch.set(payRef, {
     raw: payment, programId: program.id, status: parsed.status, warnings: parsed.warnings,
-    needsReview: parsed.warnings.length > 0, processed: true, receivedAt: new Date().toISOString(),
-  });
+    needsReview: parsed.warnings.length > 0 || flaggedBefore, processed: true, processingSince: FieldValue.delete(),
+    receivedAt: new Date().toISOString(),
+  }, { merge: true });
   await batch.commit();
   return NextResponse.json({ ok: true });
 }

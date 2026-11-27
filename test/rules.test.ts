@@ -22,7 +22,7 @@ const as = (email: string, verified = true) =>
 before(async () => {
   env = await initializeTestEnvironment({
     projectId: "demo-dices-checkin",
-    firestore: { rules: readFileSync("firestore.rules", "utf8"), host: "127.0.0.1", port: 8181 },
+    firestore: { rules: readFileSync("firestore.rules", "utf8"), host: "127.0.0.1", port: 8287 },
   });
 });
 after(async () => env?.cleanup());

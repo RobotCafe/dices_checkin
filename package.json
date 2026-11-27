@@ -8,7 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/passes.test.ts test/zeffy.test.ts",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-dices-checkin \"tsx --test test/rules.test.ts\"",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-dices-checkin \"tsx --tsconfig tsconfig.json --test --test-concurrency=1 test/rules.test.ts test/webhook.test.ts\"",
     "seed-admin": "tsx --env-file=.env.local scripts/seed-admin.ts"
   },
   "dependencies": {
