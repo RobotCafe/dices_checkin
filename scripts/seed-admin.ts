@@ -1,4 +1,4 @@
-// Usage: FIREBASE_SERVICE_ACCOUNT_B64=... npm run seed-admin -- you@example.com
+// Usage: npm run seed-admin -- you@example.com   (reads .env.local)
 import { adminDb } from "../src/lib/admin";
 import { GROWING_UP_DENMAN } from "../src/lib/programConfig";
 

@@ -31,7 +31,7 @@ Programs like Growing Up Denman had no way to collect payment at registration or
 - BC has no daylight saving; Zeffy is set to GMT-7. All dates here are BC time (`src/lib/time.ts`).
 - Product name: "DICES check-in"; repo `dices_checkin`.
 
-## State of the code (all in this repo, one commit)
+## State of the code (all in this repo)
 Built and unit-tested (`npm test`, `npm run typecheck`, `next build` all pass). **Never run against a real Firebase
 project or a real Zeffy payment.**
 - `src/lib/types.ts`: Program, Household, Person, Pass, Visit, Headcount, StaffMember.
@@ -78,13 +78,18 @@ project or a real Zeffy payment.**
   account attached first (Nicolas is waiting on that).
 - QuickBooks syncs only electronic payouts; cash and e-transfer must be recorded there separately.
 
-## Setup checklist (Nicolas is doing the accounts; Vercel and Firebase tools should be available in Claude Code)
-1. `npm install`; create the Firebase project (Firestore + Google sign-in); add authorized domains
-   (checkin.dices.ca and the *.vercel.app one).
-2. `cp .env.example .env.local` and fill in: Firebase web config, `FIREBASE_SERVICE_ACCOUNT_B64`
-   (`base64 -w0 key.json`), and a random `ZEFFY_WEBHOOK_TOKEN`.
-3. `npx firebase deploy --only firestore`; `npm run seed-admin -- <nicolas's google email>`.
-4. Vercel: create the project from the repo, add the same env vars, add the domain checkin.dices.ca.
+## Setup checklist (Nicolas is doing the accounts)
+Tools: Firebase CLI (`firebase`, logged in) and Vercel CLI (`vercel`, run `vercel login` once) are installed on
+Nicolas's Windows machine. There is no Firebase connector in Claude Code; a Vercel connector is available.
+1. `npm install`; create the Firebase project (Firestore + Google sign-in); `firebase use --add` to select it;
+   add authorized domains (checkin.dices.ca and the *.vercel.app one).
+2. `cp .env.example .env.local` and fill in: Firebase web config, `FIREBASE_SERVICE_ACCOUNT_B64`, and a random
+   `ZEFFY_WEBHOOK_TOKEN`. Base64 the key in PowerShell with
+   `[Convert]::ToBase64String([IO.File]::ReadAllBytes("key.json"))` (Linux: `base64 -w0 key.json`).
+   Delete key.json afterwards; never commit it.
+3. `firebase deploy --only firestore`; `npm run seed-admin -- <nicolas's google email>` (reads `.env.local`).
+4. Vercel: `vercel link` (or create the project from the GitHub repo), add the same env vars, add the domain
+   checkin.dices.ca.
 5. In Zeffy (Settings > Integrations) set the webhook to
    `https://checkin.dices.ca/api/zeffy/webhook?token=<ZEFFY_WEBHOOK_TOKEN>`.
 6. Admin > Programs: paste the Zeffy campaign id for each program; then test purchases and fix `zeffy.ts` (item 1).

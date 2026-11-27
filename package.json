@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/*.test.ts",
-    "seed-admin": "tsx scripts/seed-admin.ts"
+    "test": "tsx --test test/passes.test.ts test/zeffy.test.ts",
+    "seed-admin": "tsx --env-file=.env.local scripts/seed-admin.ts"
   },
   "dependencies": {
     "firebase": "^11.0.0",
