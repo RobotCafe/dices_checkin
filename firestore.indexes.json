@@ -1,1 +1,21 @@
-{ "indexes": [], "fieldOverrides": [] }
+{
+  "indexes": [
+    {
+      "collectionGroup": "people",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "programIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "mergedInto", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "households",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "programIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "mergedInto", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
