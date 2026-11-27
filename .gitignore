@@ -10,3 +10,5 @@ firestore-debug.log
 .vercel
 .env*
 !.env.example
+*-firebase-adminsdk-*.json
+serviceAccount*.json
