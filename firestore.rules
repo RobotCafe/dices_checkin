@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function staffRef() {
+      return /databases/$(database)/documents/staff/$(request.auth.token.email.lower());
+    }
+    function isStaff() { return signedIn() && exists(staffRef()); }
+    function isAdmin() { return isStaff() && get(staffRef()).data.role == 'admin'; }
+    // Program leads carry a programIds list; admins and staff without one see everything.
+    function scope() { return get(staffRef()).data.get('programIds', null); }
+    function allPrograms() { return isAdmin() || scope() == null; }
+    function inProgram(pid) { return isStaff() && (allPrograms() || pid in scope()); }
+    function overlaps(pids) { return isStaff() && (allPrograms() || pids.hasAny(scope())); }
+
+    match /staff/{email} {
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Program definitions: every staff member can read; only the admin edits.
+    match /programs/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    // People and households are visible only to staff whose scope covers a program they belong to.
+    match /households/{id} {
+      allow read: if overlaps(resource.data.programIds);
+      allow create: if overlaps(request.resource.data.programIds);
+      allow update: if overlaps(resource.data.programIds) && overlaps(request.resource.data.programIds);
+      allow delete: if false;
+    }
+    match /people/{id} {
+      allow read: if overlaps(resource.data.programIds);
+      allow create: if overlaps(request.resource.data.programIds);
+      allow update: if overlaps(resource.data.programIds) && overlaps(request.resource.data.programIds);
+      allow delete: if false;
+    }
+    match /passes/{id} {
+      allow read: if inProgram(resource.data.programId);
+      allow create: if inProgram(request.resource.data.programId);
+      allow update: if inProgram(resource.data.programId) && request.resource.data.programId == resource.data.programId;
+      allow delete: if false;
+    }
+
+    match /visits/{id} {
+      allow read: if inProgram(resource.data.programId);
+      allow create: if inProgram(request.resource.data.programId)
+        && request.resource.data.checkInBy == request.auth.token.email.lower();
+      allow update: if inProgram(resource.data.programId) && (
+        // check-out: only the check-out fields may change
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkOutAt', 'checkOutBy', 'checkOutAuto'])
+        // void: admin only
+        || (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided', 'voidedBy', 'voidReason']))
+        // merge duplicate people: admin re-points a visit
+        || (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['personId']))
+      );
+      allow delete: if false;
+    }
+
+    // Anonymous attendance counts (no names).
+    match /headcounts/{id} {
+      allow read: if inProgram(resource.data.programId);
+      allow create, update: if inProgram(request.resource.data.programId)
+        && id == request.resource.data.programId + '_' + request.resource.data.sessionDate
+        && request.resource.data.count is int && request.resource.data.count >= 0;
+      allow delete: if false;
+    }
+
+    // Raw Zeffy events: written by the server (Admin SDK bypasses rules). Admin reads them.
+    match /payments/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /audit/{id} {
+      allow read: if isAdmin();
+      allow create: if isStaff();
+      allow update, delete: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
