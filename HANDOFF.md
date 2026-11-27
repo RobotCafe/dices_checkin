@@ -1,6 +1,7 @@
 # Handoff: DICES check-in
 
-Written 2026-11-26 from a claude.ai chat, for Claude Code. Owner: Nicolas (Denman Island, BC), who runs this for
+Written 2026-11-26 from a claude.ai chat, for Claude Code; updated at the end of the first Claude Code session
+(2026-11-26, late evening), when the app went live. Owner: Nicolas (Denman Island, BC), who runs this for
 DICES (Denman Island Community Education Society, a registered charity). He builds in Next.js + Firebase and has a
 similar app, GreenRaven Ops, to match in style (master admin plus staff invites).
 
@@ -12,7 +13,8 @@ Programs like Growing Up Denman had no way to collect payment at registration or
 - It will serve **many DICES programs**: Growing Up Denman, After School Arts and Rec, Adult Education, Adult
   Recreation (soccer, volleyball, basketball), Teen Night, school food, spring break and summer camps, food bank,
   holiday hampers, market coupons, school support.
-- Planned home: https://checkin.dices.ca (subdomain of the WordPress site dices.ca; one CNAME at the DNS host).
+- **Live at https://dices-checkin.vercel.app** (Nicolas has signed in as admin). Planned home:
+  https://checkin.dices.ca (subdomain of the WordPress site dices.ca; one CNAME at the DNS host, not added yet).
 - GitHub: https://github.com/RobotCafe/dices_checkin
 
 ## Decisions already made (don't re-ask)
@@ -32,9 +34,10 @@ Programs like Growing Up Denman had no way to collect payment at registration or
 - Product name: "DICES check-in"; repo `dices_checkin`.
 
 ## State of the code (all in this repo)
-Built and tested: `npm test` (unit), `npm run test:rules` (Firestore rules + Zeffy webhook on the emulator; needs
-Java, which is installed), `npm run typecheck`, `npm run build` (needs the `NEXT_PUBLIC_FIREBASE_*` vars set, even
-placeholders). **Never run against a real Firebase project or a real Zeffy payment.**
+Built, tested and deployed. Tests: `npm test` (22 unit), `npm run test:rules` (17 on the Firestore emulator:
+security rules and the Zeffy webhook; needs Java, which is installed), `npm run typecheck`, `npm run build` (needs
+the `NEXT_PUBLIC_FIREBASE_*` vars, which `.env.local` now has). **Production data is real from now on:** test
+against the emulator, not the live project, and never write test records into the live Firestore.
 - Fixed 2026-11-26 in Claude Code: birth dates parsed from free text or separate day/month/year answers (ambiguous
   ones flagged, not guessed); check-in writes no longer awaited (offline UI froze); headcount uses `increment()`;
   a visit can be checked out only once; headcount docs reject extra fields; composite indexes declared; webhook
@@ -42,15 +45,20 @@ placeholders). **Never run against a real Firebase project or a real Zeffy payme
 - `src/lib/types.ts`: Program, Household, Person, Pass, Visit, Headcount, StaffMember.
 - `src/lib/passes.ts`: pure check-in logic (`decideCheckIn`, `statusOf`, `punchCostFor`). Punches left are
   computed from visits (so it works offline). Pass priority: season, punch, drop-in, pay-what-you-can.
-- `src/lib/zeffy.ts`: maps a Zeffy payment to tickets. **Field names are guesses** (see below).
+- `src/lib/zeffy.ts`: maps a Zeffy payment to tickets, following Zeffy's documented schema (see below).
+- `src/lib/zeffyApi.ts`: read-only `GET /v1/payments/:id` (used for `payment.updated`).
+- `src/lib/webhookSignature.ts`: verifies `Zeffy-Signature`.
 - `src/lib/programConfig.ts`: pass-type text parsing and the Growing Up Denman preset.
-- `src/app/api/zeffy/webhook/route.ts`: one webhook for all programs; program found by Zeffy campaign id;
-  idempotent per payment id; stores the raw payload in `payments/` and flags problems for review.
+- `src/app/api/zeffy/webhook/route.ts`: one webhook for all programs; checks the URL token and Zeffy's signature;
+  program found by Zeffy campaign id; idempotent per payment id (transactional claim); stores the raw payload in
+  `payments/` and flags problems for review; refunds and disputes looked up through the API and flagged; other
+  events kept in `webhookEvents/`.
 - `src/app/page.tsx` (check-in/out, program picker remembered per tablet, headcount counter),
   `src/app/admin/page.tsx` (staff and scopes, programs editor, merge people, payments needing review),
   `src/app/reports/page.tsx` (usage per program, CSV export). `src/gate.tsx` is the auth gate.
 - `firestore.rules`: staff = verified Google email with a doc in `staff/{email}`; admin sees all; program leads
-  limited by `programIds`; headcount docs have no personal data; payments readable by admin only.
+  limited by `programIds`; headcount docs accept only their own fields; a visit is checked out once; payments and
+  webhookEvents readable by admin only.
 - `scripts/seed-admin.ts`: creates the master admin and an example Growing Up Denman program.
 - Offline: Firestore persistent local cache is enabled in `src/lib/firebase.ts` (not yet tested on a tablet).
 
@@ -94,42 +102,61 @@ placeholders). **Never run against a real Firebase project or a real Zeffy payme
   account attached first (Nicolas is waiting on that).
 - QuickBooks syncs only electronic payouts; cash and e-transfer must be recorded there separately.
 
-## Setup checklist (Nicolas is doing the accounts)
-Tools: Firebase CLI (`firebase`, logged in) and Vercel CLI (`vercel`, run `vercel login` once) are installed on
-Nicolas's Windows machine. There is no Firebase connector in Claude Code; a Vercel connector is available.
-1. DONE 2026-11-26: Firebase project `dices-checkin` (linked in `.firebaserc`), web app registered, Firestore
-   `(default)` in northamerica-northeast1 (Montréal), rules and indexes deployed, `.env.local` has the web config
-   and a webhook token. An empty database `default-canada` was created by mistake: delete it in the console.
-   Never run `firebase deploy` before a database exists: it creates `(default)` in the US (nam5).
-   Google sign-in enabled. STILL TO DO: add authorized domains (checkin.dices.ca and the *.vercel.app one).
-   DONE: steps 2 and 3 (service account in `.env.local` and Vercel; admin = Nicolas's Google account; Growing Up
-   Denman program created with its Zeffy campaign id). Vercel project `dices-checkin` linked to the GitHub repo,
-   env vars set for production and preview. The repo is public (Vercel Hobby blocked deploys from a private repo
-   because the commit author email isn't linked to the Vercel account). Nicolas's PC clock was an hour off (Pacific
-   zone set by hand), which broke Google auth; fixed by setting Windows to UTC-7 with automatic time.
-2. `cp .env.example .env.local` and fill in: Firebase web config, `FIREBASE_SERVICE_ACCOUNT_B64`, and a random
-   `ZEFFY_WEBHOOK_TOKEN`. Base64 the key in PowerShell with
-   `[Convert]::ToBase64String([IO.File]::ReadAllBytes("key.json"))` (Linux: `base64 -w0 key.json`).
-   Delete key.json afterwards; never commit it.
-3. `firebase deploy --only firestore`; `npm run seed-admin -- <nicolas's google email>` (reads `.env.local`).
-4. Vercel: `vercel link` (or create the project from the GitHub repo), add the same env vars, add the domain
-   checkin.dices.ca.
-5. In Zeffy (Settings > Integrations) set the webhook to
-   `https://checkin.dices.ca/api/zeffy/webhook?token=<ZEFFY_WEBHOOK_TOKEN>`.
-6. Admin > Programs: paste the Zeffy campaign id for each program; then test purchases and fix `zeffy.ts` (item 1).
+## Deployment (live since 2026-11-26)
+Tools on Nicolas's Windows PC: Firebase CLI and Vercel CLI, both logged in as Nicolas. There is no Firebase
+connector in Claude Code; Vercel and Zeffy (read-only) connectors are available. Secrets live only in `.env.local`
+(git-ignored) and in Vercel's environment settings: never print them or commit them.
+
+**Firebase** (project `dices-checkin`, linked in `.firebaserc`):
+- Firestore `(default)` in northamerica-northeast1 (Montreal); rules and indexes deployed
+  (`firebase deploy --only firestore`). Google sign-in enabled. Authorized domains: dices-checkin.vercel.app
+  (add checkin.dices.ca when the CNAME is in).
+- Master admin: Nicolas's Google account. Growing Up Denman program created by `npm run seed-admin`, with its
+  Zeffy campaign id set.
+- Lesson learned: never run `firebase deploy` before the database exists; it silently creates `(default)` in the
+  US (nam5). An empty database `default-canada` was created by mistake while fixing this: **delete it** in the
+  console (leftover).
+
+**Vercel** (project `dices-checkin`, account ndecosson-7337, Hobby plan):
+- Connected to GitHub: every push to `main` deploys to production. The repo is public, because Hobby blocked
+  deploys from the private repo (the commit author email isn't linked to the Vercel account). To make it private
+  again, commit with Nicolas's GitHub noreply email.
+- Environment (production and preview): `NEXT_PUBLIC_FIREBASE_API_KEY` / `_AUTH_DOMAIN` / `_PROJECT_ID` / `_APP_ID`
+  (public config), `FIREBASE_SERVICE_ACCOUNT_B64`, `ZEFFY_WEBHOOK_TOKEN`, `ZEFFY_WEBHOOK_SECRET`, `ZEFFY_API_KEY`
+  (secrets). Add new ones with `vercel env add NAME --environment production --type secret` (and preview).
+- Custom domain checkin.dices.ca is added to the project but **not live**: it needs a CNAME `checkin` ->
+  `bb718682fe4611b9.vercel-dns-017.com` at Canadian Web Hosting (dices.ca's DNS host; Nicolas is finding the
+  login). Don't move the nameservers to Vercel: that would break the WordPress site and email.
+
+**Zeffy**: webhook set to `https://dices-checkin.vercel.app/api/zeffy/webhook?token=<ZEFFY_WEBHOOK_TOKEN>`, events
+payment.completed / updated / deleted. Switch the URL to checkin.dices.ca once that works (the vercel.app URL
+keeps working regardless). API key verified (read-only use).
+
+**Leftovers for Nicolas**: delete `default-canada`; delete the service account key file
+(`dices-checkin-firebase-adminsdk-*.json`, git-ignored) from the project folder; add the CNAME.
+
+**Gotchas on this machine**: the PC clock was an hour off (Pacific zone, set by hand), which made Google reject
+the service account and the Firebase CLI login; fixed by setting Windows to UTC-7 (Yukon) with automatic time.
+If Google auth suddenly says "expired" or "invalid credentials", check the clock first, then `firebase login --reauth`.
 
 ## Suggested next work, in order
-1. Get it deployed and signed in (new Firebase project, ideally owned by a DICES Google account; new Vercel
-   project in Nicolas's account, linked to the GitHub repo).
-2. Test purchases, then fix the Zeffy mapping and add the manual-entry poll if needed.
-3. Try it on the actual tablet: offline check-in, large tap targets, program memory.
-4. Revenue and break-even per program (inputs: cost per session, revenue from passes) and a visit-void screen.
-5. Retention/cleanup of children's records after each season; make it an installable PWA.
+1. **Test purchases** (waiting on Nicolas attaching the bank account in Zeffy): one of each Growing Up Denman rate,
+   starting with Pay what you can ($0). For each, check the `payments/<id>` doc, the person and pass created, and
+   the check-in screen. Adjust `zeffy.ts` if the live data differs from the docs (birth date questions, dietary).
+2. Find out whether manual cash/e-transfer payments fire `payment.completed`; if not, add a scheduled poll of
+   `GET /v1/payments?type=manual` (limit=100; rate limit is 100 requests/minute per organization).
+3. CNAME for checkin.dices.ca, then the authorized domain in Firebase and the Zeffy webhook URL.
+4. Try it on the actual tablet: offline check-in, large tap targets, program memory.
+5. Revenue and break-even per program (inputs: cost per session, revenue from passes) and a visit-void screen;
+   decide what happens to passes on a refund.
+6. Retention/cleanup of children's records after each season; make it an installable PWA.
 
 ## Related material
 - Claude Doc "Growing Up Denman: Break-Even and Program Metrics": https://claude.ai/artifact/KwXTcDxdmvaNLSwxGiQAns
   (pricing, break-even method: at about $4.50 per visit, $100/$150/$200 per Friday needs 22/33/44 kids; tier copy;
   thank-you email copy; a "Check-in app: design draft" section that predates the multi-program refactor).
+- `CHANGELOG.md`: what changed and when, in plain language. Keep it updated with every change (see CLAUDE.md).
+- Zeffy API reference: https://api.zeffy.com/api/docs (rate limits, webhook events and signatures, Payment schema).
 
 ## Conventions
 - Emulator runs on port 8287 (8181 is taken by another app on this machine). On Windows, `firebase emulators:exec`

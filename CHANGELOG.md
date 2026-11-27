@@ -8,7 +8,11 @@ Sections per release: **Added** (new features), **Changed** (behaviour that work
 
 ## Unreleased
 
-Not yet deployed to Vercel.
+Nothing yet.
+
+## 0.2.0 (2026-11-26): live at dices-checkin.vercel.app
+
+First deployment. Built and tested in Claude Code the same evening as 0.1.0.
 
 ### Setup (deployment)
 - Firebase project `dices-checkin` created, with a web app registered. Firestore `(default)` database in
