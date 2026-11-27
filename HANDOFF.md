@@ -94,7 +94,12 @@ Nicolas's Windows machine. There is no Firebase connector in Claude Code; a Verc
    `(default)` in northamerica-northeast1 (Montréal), rules and indexes deployed, `.env.local` has the web config
    and a webhook token. An empty database `default-canada` was created by mistake: delete it in the console.
    Never run `firebase deploy` before a database exists: it creates `(default)` in the US (nam5).
-   STILL TO DO: enable Google sign-in; add authorized domains (checkin.dices.ca and the *.vercel.app one).
+   Google sign-in enabled. STILL TO DO: add authorized domains (checkin.dices.ca and the *.vercel.app one).
+   DONE: steps 2 and 3 (service account in `.env.local` and Vercel; admin = Nicolas's Google account; Growing Up
+   Denman program created with its Zeffy campaign id). Vercel project `dices-checkin` linked to the GitHub repo,
+   env vars set for production and preview. The repo is public (Vercel Hobby blocked deploys from a private repo
+   because the commit author email isn't linked to the Vercel account). Nicolas's PC clock was an hour off (Pacific
+   zone set by hand), which broke Google auth; fixed by setting Windows to UTC-7 with automatic time.
 2. `cp .env.example .env.local` and fill in: Firebase web config, `FIREBASE_SERVICE_ACCOUNT_B64`, and a random
    `ZEFFY_WEBHOOK_TOKEN`. Base64 the key in PowerShell with
    `[Convert]::ToBase64String([IO.File]::ReadAllBytes("key.json"))` (Linux: `base64 -w0 key.json`).

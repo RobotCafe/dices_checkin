@@ -13,6 +13,9 @@ Not yet deployed to Vercel.
 ### Setup (deployment)
 - Firebase project `dices-checkin` created, with a web app registered. Firestore `(default)` database in
   Montréal (`northamerica-northeast1`), so the data stays in Canada; security rules and indexes deployed.
+- Google sign-in enabled. Master admin and the Growing Up Denman program (linked to its Zeffy campaign) created.
+- Vercel project `dices-checkin` created and connected to the GitHub repo (now public); settings stored in Vercel.
+- Firebase service account key files can never be committed.
 
 ### Fixed
 - Birth dates from Zeffy are read whether the buyer typed one date ("March 2, 2021", "2021-03-02", "25/03/2021")
