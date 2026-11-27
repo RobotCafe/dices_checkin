@@ -90,8 +90,11 @@ placeholders). **Never run against a real Firebase project or a real Zeffy payme
 ## Setup checklist (Nicolas is doing the accounts)
 Tools: Firebase CLI (`firebase`, logged in) and Vercel CLI (`vercel`, run `vercel login` once) are installed on
 Nicolas's Windows machine. There is no Firebase connector in Claude Code; a Vercel connector is available.
-1. `npm install`; create the Firebase project (Firestore + Google sign-in); `firebase use --add` to select it;
-   add authorized domains (checkin.dices.ca and the *.vercel.app one).
+1. DONE 2026-11-26: Firebase project `dices-checkin` (linked in `.firebaserc`), web app registered, Firestore
+   `(default)` in northamerica-northeast1 (Montréal), rules and indexes deployed, `.env.local` has the web config
+   and a webhook token. An empty database `default-canada` was created by mistake: delete it in the console.
+   Never run `firebase deploy` before a database exists: it creates `(default)` in the US (nam5).
+   STILL TO DO: enable Google sign-in; add authorized domains (checkin.dices.ca and the *.vercel.app one).
 2. `cp .env.example .env.local` and fill in: Firebase web config, `FIREBASE_SERVICE_ACCOUNT_B64`, and a random
    `ZEFFY_WEBHOOK_TOKEN`. Base64 the key in PowerShell with
    `[Convert]::ToBase64String([IO.File]::ReadAllBytes("key.json"))` (Linux: `base64 -w0 key.json`).

@@ -8,7 +8,11 @@ Sections per release: **Added** (new features), **Changed** (behaviour that work
 
 ## Unreleased
 
-Not yet deployed. No Firebase project or Vercel project exists yet.
+Not yet deployed to Vercel.
+
+### Setup (deployment)
+- Firebase project `dices-checkin` created, with a web app registered. Firestore `(default)` database in
+  Montréal (`northamerica-northeast1`), so the data stays in Canada; security rules and indexes deployed.
 
 ### Fixed
 - Birth dates from Zeffy are read whether the buyer typed one date ("March 2, 2021", "2021-03-02", "25/03/2021")
