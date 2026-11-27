@@ -1,11 +1,12 @@
 import type { PassKind, PassTypeConfig, Program } from "./types";
 
 /**
- * Maps a Zeffy payment object to our records.
- *
- * ASSUMPTION: Zeffy documents that payments carry line items, buyer info and answers to custom
- * questions, but not the exact field names. Several likely names are tried below. VERIFY against
- * the first test purchase (the raw payload is saved in /payments) and tighten this file.
+ * Maps a Zeffy payment object to our records. Field names follow Zeffy's OpenAPI spec
+ * (https://api.zeffy.com/api/docs, read 2026-11-26): Payment { id, created (unix s), status, type
+ * online|manual|imported, refund_status, campaign_id, buyer { first_name, last_name, email },
+ * buyer_questions[], items[] }. Each ticket is its own item { type: ticket|donation|additional_donation,
+ * rate_title, questions[] }. Answers are { question, type, answer } where answer is a string, an array
+ * (multi_select) or a boolean (checkbox). Still confirm against the first real purchase.
  */
 
 type Obj = Record<string, any>;
@@ -27,11 +28,12 @@ export interface ParsedPayment {
   buyerEmail: string;
   buyerPhone?: string;
   purchasedAt: string;
+  source: string; // online | manual | imported
+  refundStatus: string; // none | partial | full
   warnings: string[];
 }
 
-export const campaignIdOf = (p: Obj): string =>
-  String(p.campaign_id ?? p.campaign?.id ?? p.form_id ?? p.form?.id ?? "");
+export const campaignIdOf = (p: Obj): string => String(p.campaign_id ?? "");
 
 export function matchPassType(rateLabel: string, types: PassTypeConfig[]): PassTypeConfig | null {
   const l = rateLabel.toLowerCase();
@@ -51,6 +53,12 @@ function answersMatching(answers: any, needle: string): { q: string; v: string }
     }
   }
   return out;
+}
+
+function answerOfType(answers: any, type: string): string {
+  const list: Obj[] = Array.isArray(answers) ? answers : [];
+  const a = list.find((x) => x.type === type && x.answer);
+  return a ? String(a.answer).trim() : "";
 }
 
 function answerOf(answers: any, needle: string): string {
@@ -108,41 +116,48 @@ export function birthDateOf(answers: any, needle: string): { date: string; raw: 
 
 export function parsePayment(p: Obj, program: Program): { payment: ParsedPayment; tickets: ParsedTicket[] } {
   const warnings: string[] = [];
-  const buyer: Obj = p.buyer ?? p.contact ?? {};
+  const buyer: Obj = p.buyer ?? {};
+  const buyerQuestions: Obj[] = p.buyer_questions ?? [];
   const buyerName =
-    String(buyer.name ?? "") || [buyer.first_name, buyer.last_name].filter(Boolean).join(" ") || answerOf(p.buyer_questions, "full name");
-  const items: Obj[] = p.line_items ?? p.lineItems ?? p.items ?? [];
+    [buyer.first_name, buyer.last_name].filter(Boolean).join(" ").trim() ||
+    answerOfType(buyerQuestions, "name") ||
+    answerOf(buyerQuestions, "full name");
+  const items: Obj[] = p.items ?? [];
   const tickets: ParsedTicket[] = [];
+  let phone = answerOfType(buyerQuestions, "phone");
 
   for (const it of items) {
-    const label = String(it.rate_title ?? it.rate ?? it.title ?? it.name ?? it.description ?? "");
+    if (it.type && it.type !== "ticket") continue; // donations and additional donations aren't passes
+    const label = String(it.rate_title ?? "");
     const type = matchPassType(label, program.passTypes);
     if (!type) {
-      if (!/donation|tip/i.test(label)) warnings.push(`Unrecognized line item: "${label}"`);
+      warnings.push(`Unrecognized ticket: "${label}"`);
       continue;
     }
-    const answers = it.answers ?? it.questions ?? p.buyer_questions ?? p.answers ?? [];
-    const qty = Number(it.quantity ?? 1) || 1;
-    for (let i = 0; i < qty; i++) {
-      const birth = birthDateOf(answers, program.questions.birth);
-      const name = program.questions.name ? answerOf(answers, program.questions.name) : buyerName;
-      tickets.push({
-        kind: type.kind,
-        punches: type.kind === "punch" ? (type.punches ?? 10) : null,
-        name,
-        birthDate: birth.date,
-        birthRaw: birth.raw,
-        dietary: answerOf(answers, program.questions.dietary).split(",").map((s) => s.trim()).filter(Boolean),
-      });
-    }
+    const answers: Obj[] = [...(it.questions ?? []), ...buyerQuestions];
+    phone ||= answerOfType(answers, "phone");
+    const birth = birthDateOf(answers, program.questions.birth);
+    const name = program.questions.name ? answerOf(answers, program.questions.name) : buyerName;
+    tickets.push({
+      kind: type.kind,
+      punches: type.kind === "punch" ? (type.punches ?? 10) : null,
+      name,
+      birthDate: birth.date,
+      birthRaw: birth.raw,
+      dietary: answerOf(answers, program.questions.dietary).split(",").map((s) => s.trim()).filter(Boolean),
+    });
   }
-  if (tickets.length === 0) warnings.push("No ticket line items found");
+  if (tickets.length === 0) warnings.push("No tickets found in this payment");
   for (const t of tickets) {
     if (!t.name) warnings.push("Missing attendee name");
     if (program.freeUnderAge != null && !t.birthDate)
       warnings.push(t.birthRaw ? `Couldn't read birth date "${t.birthRaw}" for "${t.name}"` : `Missing birth date for "${t.name}"`);
   }
+  const refundStatus = String(p.refund_status ?? "none");
+  if (refundStatus !== "none") warnings.push(`Payment already has a ${refundStatus} refund`);
+  if (p.dispute) warnings.push("Payment is disputed");
 
+  const created = Number(p.created);
   return {
     payment: {
       paymentId: String(p.id ?? ""),
@@ -150,8 +165,10 @@ export function parsePayment(p: Obj, program: Program): { payment: ParsedPayment
       campaignId: campaignIdOf(p),
       buyerName,
       buyerEmail: String(buyer.email ?? "").toLowerCase(),
-      buyerPhone: buyer.phone ? String(buyer.phone) : undefined,
-      purchasedAt: String(p.created_at ?? p.createdAt ?? new Date().toISOString()),
+      buyerPhone: phone || undefined,
+      purchasedAt: Number.isFinite(created) && created > 0 ? new Date(created * 1000).toISOString() : new Date().toISOString(),
+      source: String(p.type ?? ""),
+      refundStatus,
       warnings,
     },
     tickets,

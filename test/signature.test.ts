@@ -1,30 +1,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { checkSignature } from "../src/lib/webhookSignature";
+import { signLikeZeffy, verifyZeffySignature } from "../src/lib/webhookSignature";
 
 const secret = "whsec_" + "ab".repeat(32); // made-up test secret
-const body = JSON.stringify({ type: "payment.completed", payment: { id: "p1" } });
+const body = JSON.stringify({ id: "evt_1", type: "payment.completed", data: { id: "p1" } });
+const now = 1795795200;
 
-test("Standard Webhooks (Svix) signature is recognised", () => {
-  const key = Buffer.from(secret.slice(6), "base64");
-  const sig = createHmac("sha256", key).update(`msg_1.1795795200.${body}`).digest("base64");
-  const h = new Headers({ "webhook-id": "msg_1", "webhook-timestamp": "1795795200", "webhook-signature": `v1,${sig}` });
-  const r = checkSignature(h, body, secret);
-  assert.equal(r.matched, "webhook-signature|id.ts.body|base64-key|base64");
-  assert.deepEqual(r.headerNames, ["webhook-id", "webhook-signature", "webhook-timestamp"]);
+test("a delivery signed as Zeffy documents is accepted", () => {
+  // Independent of signLikeZeffy: HMAC-SHA256 keyed with the whole whsec_ string, hex, over "{t}.{rawBody}".
+  const v1 = createHmac("sha256", secret).update(`${now}.${body}`).digest("hex");
+  assert.deepEqual(verifyZeffySignature(body, `t=${now},v1=${v1}`, secret, now), { ok: true });
+  assert.deepEqual(verifyZeffySignature(body, signLikeZeffy(body, secret, now), secret, now + 60), { ok: true });
 });
 
-test("Stripe-style t=,v1= with a hex key is recognised", () => {
-  const sig = createHmac("sha256", Buffer.from(secret.slice(6), "hex")).update(`1795795200.${body}`).digest("hex");
-  const h = new Headers({ "x-zeffy-signature": `t=1795795200,v1=${sig}` });
-  assert.equal(checkSignature(h, body, secret).matched, "x-zeffy-signature|ts.body|hex-key|hex");
+test("tampered body, wrong secret, missing header are rejected", () => {
+  const h = signLikeZeffy(body, secret, now);
+  assert.equal(verifyZeffySignature(body + " ", h, secret, now).ok, false);
+  assert.equal(verifyZeffySignature(body, h, "whsec_other", now).ok, false);
+  assert.equal(verifyZeffySignature(body, null, secret, now).ok, false);
+  assert.equal(verifyZeffySignature(body, "t=abc,v1=00", secret, now).ok, false);
+  assert.equal(verifyZeffySignature(body, h, "", now).ok, false);
 });
 
-test("forged or missing signatures don't match", () => {
-  const h = new Headers({ "webhook-id": "msg_1", "webhook-timestamp": "1", "webhook-signature": "v1,AAAA" });
-  assert.equal(checkSignature(h, body, secret).matched, null);
-  assert.equal(checkSignature(new Headers(), body, secret).matched, null);
-  const tampered = createHmac("sha256", Buffer.from(secret.slice(6), "base64")).update(`msg_1.1.${body}x`).digest("base64");
-  assert.equal(checkSignature(new Headers({ "webhook-id": "msg_1", "webhook-timestamp": "1", "webhook-signature": `v1,${tampered}` }), body, secret).matched, null);
+test("old or future timestamps are rejected (5 minute tolerance, replay protection)", () => {
+  assert.equal(verifyZeffySignature(body, signLikeZeffy(body, secret, now - 301), secret, now).ok, false);
+  assert.equal(verifyZeffySignature(body, signLikeZeffy(body, secret, now + 301), secret, now).ok, false);
+  assert.equal(verifyZeffySignature(body, signLikeZeffy(body, secret, now - 299), secret, now).ok, true);
 });

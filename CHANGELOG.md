@@ -18,10 +18,17 @@ Not yet deployed to Vercel.
 - Firebase service account key files can never be committed.
 
 ### Added
-- Zeffy webhook signature check, in observe mode. Zeffy signs each message with a secret but doesn't document how,
-  so the app tries the likely methods, records which one matched (and which headers Zeffy sent) on each payment,
-  and doesn't reject anything yet. The secret token in the webhook URL still protects the endpoint. Events the app
-  doesn't act on (such as a Zeffy test) are kept in an admin-only `webhookEvents` collection.
+- Zeffy webhook signatures are verified, following Zeffy's API documentation: messages without a valid
+  `Zeffy-Signature` or older than 5 minutes are rejected. Events the app doesn't act on are kept in an admin-only
+  `webhookEvents` collection.
+- Refunds and disputes: when Zeffy reports a payment changed, the app looks it up through Zeffy's API and flags
+  refunds and disputes for review.
+
+### Changed
+- Reading Zeffy payments now follows Zeffy's documented format instead of guessed field names. The purchase time
+  comes from Zeffy (it used to be the time the app received the message), donations in the same payment are
+  skipped quietly, the buyer's phone is picked up from the phone question, and each payment records whether it
+  was online or entered manually. Payments that already have a refund or dispute are flagged.
 
 ### Fixed
 - Birth dates from Zeffy are read whether the buyer typed one date ("March 2, 2021", "2021-03-02", "25/03/2021")

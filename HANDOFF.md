@@ -55,20 +55,19 @@ placeholders). **Never run against a real Firebase project or a real Zeffy payme
 - Offline: Firestore persistent local cache is enabled in `src/lib/firebase.ts` (not yet tested on a tablet).
 
 ## What is unverified or known-weak (check these first)
-1. **Zeffy payload shape.** Zeffy's docs say payments carry line items, buyer info and answers to custom questions,
-   but not the field names. `parsePayment` tries several. Do a test purchase of each rate, read the saved raw
-   payload (`payments/<id>`), and tighten `src/lib/zeffy.ts` and its tests. The webhook event is `payment.completed`;
-   `payment.updated` (refunds/disputes) carries only the id.
-1b. **Webhook signature scheme.** Zeffy gave a `whsec_` signing secret (in `.env.local` and Vercel as
-   `ZEFFY_WEBHOOK_SECRET`) but its docs don't say how messages are signed (the API reference at
-   zeffy.com/api/docs only renders in a browser). `src/lib/webhookSignature.ts` runs in OBSERVE mode: each
-   payment / `webhookEvents` doc gets a `signature` field with `matched` (which variant worked, or null) and the
-   header names. After the first real delivery: read that, keep only the matching variant, reject on mismatch,
-   and add a timestamp tolerance (5 minutes). If nothing matched, read the API docs in a browser or ask Zeffy.
-   Webhook is set up in Zeffy for payment.completed, payment.updated, payment.deleted. A Zeffy API key is stored
-   as `ZEFFY_API_KEY` (`.env.local` and Vercel; verified working, unused by the code so far).
+1. **Zeffy payload shape: documented, not yet seen live.** Zeffy's API reference is https://api.zeffy.com/api/docs
+   (the OpenAPI spec is embedded in that page; extract it from the HTML). `src/lib/zeffy.ts` and the tests now
+   follow it: event `{ id, type, version, dispatchedAt, data }`; Payment `created` is unix seconds; each ticket is
+   its own item (`type: ticket`, `rate_title`, `questions`); answers `{ question, type, answer }`.
+   `payment.updated` / `payment.deleted` carry only `{ id }`: the webhook fetches `GET /v1/payments/:id` with
+   `ZEFFY_API_KEY` and flags refunds and disputes for review. Still do a test purchase of each rate and check the
+   saved `payments/<id>` doc, especially how the birth date questions and the dietary multi-select come through.
+1b. **Webhook signatures are verified** (strict): `Zeffy-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "{t}.{rawBody}">`
+   keyed with the whole `whsec_` string, 5-minute tolerance (`src/lib/webhookSignature.ts`). Bad signature = 400.
+   The URL token is kept as a second check. Webhook is set up in Zeffy for payment.completed, payment.updated,
+   payment.deleted. Zeffy has no "send test" button. Retries run up to 3 days.
 2. **Do manual cash/e-transfer entries fire the webhook or appear in the API?** Unknown; docs say the API can filter
-   payments by type online/manual/imported. If not, add a scheduled poll of the Zeffy API (Bearer key, read-only for
+   payments by type online/manual/imported, and each stored payment records its `source`. If not, add a scheduled poll of the Zeffy API (Bearer key, read-only for
    payments; it can also write manual payments once Stripe verification is done).
 3. How a ticket bought for one Friday occurrence relates to a season pass: Zeffy multi-date events make the buyer
    pick one date per transaction, so a Year Supporter / punch ticket is tied to one occurrence. The app ignores the
@@ -77,8 +76,8 @@ placeholders). **Never run against a real Firebase project or a real Zeffy payme
    composite indexes are declared; the emulator doesn't enforce indexes, so watch for index errors on first real use.
 5. Revenue and break-even reporting is not built (only usage). Voiding a visit has a rule but no UI.
 6. Open decisions: a person who checks out and comes back the same day uses another punch (intended?); the raw
-   Zeffy payload in `payments/` keeps every answer (include it in the retention decision); the webhook token sits in
-   the URL, so it appears in Vercel request logs (check whether Zeffy can sign webhooks instead).
+   Zeffy payload in `payments/` keeps every answer (include it in the retention decision); a refund is flagged for
+   review but its passes are not voided automatically (decide whether they should be).
 
 ## Zeffy facts (read via the official Zeffy connector, read-only; nothing was changed)
 - Campaign "Growing Up Denman" (event). Organization is in Canada (CAD). Rates: Drop-in $5; "Punch card: 10 sessions"

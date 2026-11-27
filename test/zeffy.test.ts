@@ -3,7 +3,20 @@ import assert from "node:assert/strict";
 import { birthDateOf, matchPassType, parseDateText, parsePayment } from "../src/lib/zeffy";
 import { GROWING_UP_DENMAN as gud, formatPassTypes, parsePassTypes } from "../src/lib/programConfig";
 
-// NOTE: payload shape is a GUESS until checked against a real Zeffy test purchase.
+// Payloads follow Zeffy's OpenAPI spec (https://api.zeffy.com/api/docs). Confirm against a real purchase.
+const q = (question: string, answer: unknown, type = "text") => ({ question, type, answer });
+const ticket = (rate_title: string, questions: object[] = []) =>
+  ({ id: "i", object: "item", type: "ticket", amount: 4000, currency: "cad", rate_title, questions });
+const zeffyPayment = (o: object = {}) => ({
+  id: "p1", object: "payment", created: 1795795200, amount: 4000, currency: "cad", status: "succeeded",
+  type: "online", refund_status: "none", refunds: [], dispute: null, campaign_id: "camp1",
+  buyer: { email: "Sam@X.ca", first_name: "Sam", last_name: "Lee", is_corporate: false, company_name: null, address: null },
+  buyer_questions: [q("Phone", "250-555-0100", "phone")],
+  items: [ticket("Punch card: 10 sessions", [q("Child's Name", "Ada", "name"), q("Child's Birth date", "2021-03-02", "date"),
+    q("Dietary restrictions", ["Nut-free", "Vegetarian"], "multi_select")])],
+  ...o,
+});
+
 test("rate labels map to pass types per program", () => {
   assert.equal(matchPassType("Punch card: 10 sessions", gud.passTypes)?.kind, "punch");
   assert.equal(matchPassType("Year Supporter", gud.passTypes)?.kind, "season");
@@ -16,26 +29,44 @@ test("pass type text round-trips", () => {
   assert.throws(() => parsePassTypes("Oops | nonsense"));
 });
 
-test("parses a guessed payload and warns on missing data", () => {
-  const { payment, tickets } = parsePayment({
-    id: "p1", status: "succeeded", campaign_id: "camp1", created_at: "2026-11-27T17:00:00Z",
-    buyer: { name: "Sam", email: "Sam@X.ca" },
-    line_items: [{ rate_title: "Punch card: 10 sessions", quantity: 1,
-      answers: [{ question: "Child's Name", answer: "Ada" }, { question: "Child's Birth date", answer: "2021-03-02" }] }],
-  }, gud);
+test("parses a payment in Zeffy's documented shape", () => {
+  const { payment, tickets } = parsePayment(zeffyPayment(), gud);
   assert.equal(payment.buyerEmail, "sam@x.ca");
-  assert.equal(tickets[0].name, "Ada");
-  assert.equal(tickets[0].punches, 10);
-  assert.equal(payment.warnings.length, 0);
+  assert.equal(payment.buyerName, "Sam Lee");
+  assert.equal(payment.buyerPhone, "250-555-0100");
+  assert.equal(payment.purchasedAt, "2026-11-27T16:00:00.000Z"); // from `created`, unix seconds
+  assert.equal(payment.source, "online");
+  assert.equal(tickets.length, 1);
+  assert.deepEqual([tickets[0].name, tickets[0].birthDate, tickets[0].punches], ["Ada", "2021-03-02", 10]);
+  assert.deepEqual(tickets[0].dietary, ["Nut-free", "Vegetarian"]);
+  assert.deepEqual(payment.warnings, []);
+});
 
-  const bad = parsePayment({ id: "p2", line_items: [{ rate_title: "Drop-in", answers: [] }] }, gud);
-  assert.ok(bad.payment.warnings.length >= 2);
+test("each ticket is its own item; donations are skipped without a warning", () => {
+  const { payment, tickets } = parsePayment(zeffyPayment({
+    items: [
+      ticket("Drop-in", [q("Child's Name", "Ada"), q("Child's Birth date", "2021-03-02")]),
+      ticket("Drop-in", [q("Child's Name", "Bo"), q("Child's Birth date", "2024-06-01")]),
+      { id: "d", object: "item", type: "additional_donation", amount: 1000, rate_title: null, questions: [] },
+    ],
+  }), gud);
+  assert.deepEqual(tickets.map((t) => t.name), ["Ada", "Bo"]);
+  assert.deepEqual(payment.warnings, []);
+});
+
+test("problems are flagged: unknown ticket, missing data, refunds", () => {
+  const bad = parsePayment(zeffyPayment({ refund_status: "full", items: [ticket("Mystery"), ticket("Drop-in")] }), gud);
+  const w = bad.payment.warnings.join(" | ");
+  assert.match(w, /Unrecognized ticket: "Mystery"/);
+  assert.match(w, /Missing attendee name/);
+  assert.match(w, /Missing birth date/);
+  assert.match(w, /full refund/);
 });
 
 test("adult program: buyer is the attendee", () => {
   const adult = { ...gud, id: "adult-ed", freeUnderAge: null, questions: { name: "", birth: "", dietary: "" } };
-  const { tickets } = parsePayment({ id: "p3", buyer: { name: "Pat", email: "p@x.ca" }, line_items: [{ rate_title: "Drop-in" }] }, adult);
-  assert.equal(tickets[0].name, "Pat");
+  const { tickets } = parsePayment(zeffyPayment({ items: [ticket("Drop-in")] }), adult);
+  assert.equal(tickets[0].name, "Sam Lee");
 });
 
 test("free-text birth dates: common formats, ambiguous ones left blank", () => {
@@ -60,10 +91,9 @@ test("birth date from separate day / month / year questions", () => {
 });
 
 test("unreadable birth date is flagged with what was typed", () => {
-  const { tickets, payment } = parsePayment({
-    id: "p4", buyer: { name: "Sam", email: "s@x.ca" },
-    line_items: [{ rate_title: "Drop-in", answers: [{ question: "Child's Name", answer: "Ada" }, { question: "Child's Birth date", answer: "03/04/2024" }] }],
-  }, gud);
+  const { tickets, payment } = parsePayment(zeffyPayment({
+    items: [ticket("Drop-in", [q("Child's Name", "Ada"), q("Child's Birth date", "03/04/2024")])],
+  }), gud);
   assert.equal(tickets[0].birthDate, "");
   assert.ok(payment.warnings.some((w) => w.includes('"03/04/2024"')));
 });
