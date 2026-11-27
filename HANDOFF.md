@@ -32,8 +32,13 @@ Programs like Growing Up Denman had no way to collect payment at registration or
 - Product name: "DICES check-in"; repo `dices_checkin`.
 
 ## State of the code (all in this repo)
-Built and unit-tested (`npm test`, `npm run typecheck`, `next build` all pass). **Never run against a real Firebase
-project or a real Zeffy payment.**
+Built and tested: `npm test` (unit), `npm run test:rules` (Firestore rules + Zeffy webhook on the emulator; needs
+Java, which is installed), `npm run typecheck`, `npm run build` (needs the `NEXT_PUBLIC_FIREBASE_*` vars set, even
+placeholders). **Never run against a real Firebase project or a real Zeffy payment.**
+- Fixed 2026-11-26 in Claude Code: birth dates parsed from free text or separate day/month/year answers (ambiguous
+  ones flagged, not guessed); check-in writes no longer awaited (offline UI froze); headcount uses `increment()`;
+  a visit can be checked out only once; headcount docs reject extra fields; composite indexes declared; webhook
+  claims each payment in a transaction (simultaneous retries made duplicate passes) and keeps an earlier refund flag.
 - `src/lib/types.ts`: Program, Household, Person, Pass, Visit, Headcount, StaffMember.
 - `src/lib/passes.ts`: pure check-in logic (`decideCheckIn`, `statusOf`, `punchCostFor`). Punches left are
   computed from visits (so it works offline). Pass priority: season, punch, drop-in, pay-what-you-can.
@@ -60,9 +65,12 @@ project or a real Zeffy payment.**
 3. How a ticket bought for one Friday occurrence relates to a season pass: Zeffy multi-date events make the buyer
    pick one date per transaction, so a Year Supporter / punch ticket is tied to one occurrence. The app ignores the
    chosen date and treats the pass as valid for the whole season.
-4. Firestore rules have not been tested in the emulator. Composite indexes may be requested on first use (the
-   error contains a link).
+4. Firestore rules are tested on the emulator (`test/rules.test.ts`), including program-lead scoping. The two
+   composite indexes are declared; the emulator doesn't enforce indexes, so watch for index errors on first real use.
 5. Revenue and break-even reporting is not built (only usage). Voiding a visit has a rule but no UI.
+6. Open decisions: a person who checks out and comes back the same day uses another punch (intended?); the raw
+   Zeffy payload in `payments/` keeps every answer (include it in the retention decision); the webhook token sits in
+   the URL, so it appears in Vercel request logs (check whether Zeffy can sign webhooks instead).
 
 ## Zeffy facts (read via the official Zeffy connector, read-only; nothing was changed)
 - Campaign "Growing Up Denman" (event). Organization is in Canada (CAD). Rates: Drop-in $5; "Punch card: 10 sessions"
@@ -71,8 +79,9 @@ project or a real Zeffy payment.**
 - Per-ticket questions: Full Name, Email, Phone (optional), Child's Name, Child's Birth date (separate text fields),
   Dietary restrictions (multi-select), Other dietary restrictions, caregiver/guardian checkbox, DICES cost
   acknowledgment checkbox, suggestions (optional).
-- 31 weekly Friday occurrences were listed (Nov 27 2026 to Jun 25 2027), with many archived duplicates from edits;
-  Nicolas has since updated the dates. Check whether holiday and spring-break Fridays are meant to be included.
+- Campaign id: `67328e79-bef7-4ffe-9bba-630ae75f35cc` (paste into Admin > Programs). Checked 2026-11-26: 25 active
+  Friday occurrences, Nov 27 2026 to Jun 25 2027, 9:00 to 12:00. No session (archived) on Dec 25, Jan 1, Mar 19,
+  Mar 26 (spring break) and May 21. Many archived duplicates from edits; ignore them. $0 raised so far.
 - Zeffy connector URL (custom connector in claude.ai): https://api.zeffy.com/mcp (read-only). Zeffy has a free
   public API plus outbound webhooks (Settings > Integrations). No Zeffy sandbox: test purchases need the bank
   account attached first (Nicolas is waiting on that).
@@ -95,8 +104,8 @@ Nicolas's Windows machine. There is no Firebase connector in Claude Code; a Verc
 6. Admin > Programs: paste the Zeffy campaign id for each program; then test purchases and fix `zeffy.ts` (item 1).
 
 ## Suggested next work, in order
-1. Get it deployed and signed in; run the Firestore emulator and test `firestore.rules` (staff, lead scoping,
-   headcount, check-out-only updates).
+1. Get it deployed and signed in (new Firebase project, ideally owned by a DICES Google account; new Vercel
+   project in Nicolas's account, linked to the GitHub repo).
 2. Test purchases, then fix the Zeffy mapping and add the manual-entry poll if needed.
 3. Try it on the actual tablet: offline check-in, large tap targets, program memory.
 4. Revenue and break-even per program (inputs: cost per session, revenue from passes) and a visit-void screen.
@@ -108,5 +117,8 @@ Nicolas's Windows machine. There is no Firebase connector in Claude Code; a Verc
   thank-you email copy; a "Check-in app: design draft" section that predates the multi-program refactor).
 
 ## Conventions
+- Emulator runs on port 8287 (8181 is taken by another app on this machine). On Windows, `firebase emulators:exec`
+  can leave the emulator's java.exe running, so the next run reports "port taken": stop that java process. Don't pipe
+  test output into `head`, which orphans it.
 - BC time only through `src/lib/time.ts`. Keep personal data out of headcount programs. Never log or commit
   secrets. Dates are YYYY-MM-DD strings in BC time; timestamps are ISO UTC.
