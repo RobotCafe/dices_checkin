@@ -1,5 +1,5 @@
 "use client";
-import { addDoc, collection, doc, setDoc, updateDoc } from "firebase/firestore";
+import { collection, doc, increment, setDoc, updateDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Gate } from "@/gate";
@@ -14,18 +14,21 @@ function Headcount({ program, me }: { program: Program; me: string }) {
   const today = bcDate(new Date());
   const id = `${program.id}_${today}`;
   const count = headcounts.find((h) => h.id === id)?.count ?? 0;
-  const set = (n: number) =>
+  // increment() so taps from several tablets (or made offline) all add up instead of overwriting.
+  const add = (by: 1 | -1) => {
+    if (by < 0 && count <= 0) return;
     setDoc(doc(db, "headcounts", id), {
-      programId: program.id, sessionDate: today, count: Math.max(0, n),
+      programId: program.id, sessionDate: today, count: increment(by),
       updatedAt: new Date().toISOString(), updatedBy: me,
-    });
+    }, { merge: true }).catch((e) => window.alert(`Couldn't save the count: ${e.message ?? e}`));
+  };
   return (
     <div style={{ textAlign: "center" }}>
       <p className="meta">No names are recorded for this program. Today: {today}</p>
       <div style={{ fontSize: "5rem", fontWeight: 700 }}>{count}</div>
       <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-        <button className="secondary" style={{ minWidth: 100 }} onClick={() => set(count - 1)}>−1</button>
-        <button style={{ minWidth: 160, fontSize: "1.4rem" }} onClick={() => set(count + 1)}>+1</button>
+        <button className="secondary" style={{ minWidth: 100 }} onClick={() => add(-1)}>−1</button>
+        <button style={{ minWidth: 160, fontSize: "1.4rem" }} onClick={() => add(1)}>+1</button>
       </div>
     </div>
   );
@@ -48,25 +51,30 @@ function Tracked({ program, me }: { program: Program; me: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, people, households]);
 
-  async function checkIn(person: Person) {
+  // Don't await writes: offline, Firestore only resolves them once the server confirms, which would
+  // leave the screen looking stuck. The local cache updates immediately and syncs when back online.
+  const save = (write: Promise<unknown>, what: string) =>
+    write.catch((e) => setMsg(`Couldn't save ${what}: ${e?.message ?? e}`));
+
+  function checkIn(person: Person) {
     const d = decideCheckIn(person, program, passes, visits, today);
     if (d.kind === "already-here") return setMsg(`${person.name} is already checked in`);
     const base = { programId: program.id, personId: person.id, sessionDate: today, checkInAt: new Date().toISOString(), checkInBy: me };
     if (d.kind === "ok") {
-      await addDoc(collection(db, "visits"), { ...base, passId: d.pass.id, punchCost: d.punchCost });
+      save(setDoc(doc(collection(db, "visits")), { ...base, passId: d.pass.id, punchCost: d.punchCost }), `check-in for ${person.name}`);
       setMsg(d.punchesLeftAfter === null ? `${person.name} checked in` : `${person.name} checked in, ${d.punchesLeftAfter} punches left`);
     } else {
       const why = d.blocked.map((b) => b.reason).join(", ") || "No pass on file";
       const reason = window.prompt(`${person.name}: no valid pass (${why}).\nOverride? Enter a reason, or cancel.`);
       if (!reason) return;
-      await addDoc(collection(db, "visits"), { ...base, passId: null, punchCost: 0, override: { reason } });
+      save(setDoc(doc(collection(db, "visits")), { ...base, passId: null, punchCost: 0, override: { reason } }), `check-in for ${person.name}`);
       setMsg(`${person.name} checked in by override, flagged for follow-up`);
     }
     setQ("");
   }
 
   const checkOut = (v: Visit, auto = false) =>
-    updateDoc(doc(db, "visits", v.id), { checkOutAt: new Date().toISOString(), checkOutBy: me, ...(auto ? { checkOutAuto: true } : {}) });
+    save(updateDoc(doc(db, "visits", v.id), { checkOutAt: new Date().toISOString(), checkOutBy: me, ...(auto ? { checkOutAuto: true } : {}) }), "check-out");
 
   function badge(p: Person) {
     const d = decideCheckIn(p, program, passes, visits, today);
