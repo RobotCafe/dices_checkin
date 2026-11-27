@@ -52,8 +52,9 @@ service cloud.firestore {
       allow create: if inProgram(request.resource.data.programId)
         && request.resource.data.checkInBy == request.auth.token.email.lower();
       allow update: if inProgram(resource.data.programId) && (
-        // check-out: only the check-out fields may change
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkOutAt', 'checkOutBy', 'checkOutAuto'])
+        // check-out: once, and only the check-out fields may change
+        (!('checkOutAt' in resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkOutAt', 'checkOutBy', 'checkOutAuto']))
         // void: admin only
         || (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided', 'voidedBy', 'voidReason']))
         // merge duplicate people: admin re-points a visit
@@ -67,6 +68,7 @@ service cloud.firestore {
       allow read: if inProgram(resource.data.programId);
       allow create, update: if inProgram(request.resource.data.programId)
         && id == request.resource.data.programId + '_' + request.resource.data.sessionDate
+        && request.resource.data.keys().hasOnly(['programId', 'sessionDate', 'count', 'updatedAt', 'updatedBy'])
         && request.resource.data.count is int && request.resource.data.count >= 0;
       allow delete: if false;
     }
